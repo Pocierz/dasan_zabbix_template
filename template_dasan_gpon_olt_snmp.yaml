@@ -1,0 +1,2117 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: 9004e4c0b8674f1880052388bb3752fb
+      name: 'Templates/Net Network devices'
+  templates:
+    - uuid: a9ecc0b1d6e646d9b6c72c7cffacf14a
+      template: 'DASAN GPON OLT SLE by SNMP'
+      name: 'DASAN GPON OLT SLE by SNMP'
+      description: |
+        DASAN / DZS GPON OLT (SLE platform, e.g. V8102 running NOS 2.x)
+        monitored over SNMP.
+         
+        Built from a live snmpwalk of a V8102 OLT (32 PON ports, 4x 10G uplinks,
+        1767 provisioned ONTs)  and cross-checked against SLE-GPON-MIB and
+        DASAN-SWITCH-MIB.
+        
+        What it collects
+        ----------------
+         * Per-port traffic on the XE uplinks and the GPON PON ports: bits in/out plus
+          separate unicast,  multicast and broadcast packet rates in both directions
+          (IF-MIB 64-bit counters), errors,  discards, link state and speed.
+        * Per-ONT data from sleGponOnuTable and sleGponOnuAniTable:  status and
+          deactivation reason, ONT Rx/Tx optical power, the upstream power the OLT sees,
+           module temperature/voltage/bias, fibre distance, link uptime, up/down counters
+          and PON-layer  BIP8/FEC error rates.
+        * OLT health: CPU load, memory, uptime, model, serial and firmware.
+         
+        Design
+        ------
+        All bulk data is fetched with a handful of SNMP `walk[]` master items; every
+         per-interface and per-ONT item is a dependent item. On the reference OLT that
+        turns ~25000 metrics  into 10 SNMP requests per cycle. The master items keep no
+        history.
+        
+        Portability
+        -----------
+         Nothing is bound to a particular chassis. Ports and ONTs come from two low-level
+        discovery rules,  so any port count, slot count and ONT count is handled
+        automatically:
+        
+        * Interface discovery  keeps every interface with a non-zero ifHighSpeed, so it
+          does not care whether the ports  are called XE0/1, GE1, TE1/1 or GPON2/16.
+        * ONT discovery reads the real PON port name from  ifDescr rather than decoding
+          the ifIndex numbering, so a chassis with a different ifIndex  scheme still gets
+          correct labels.
+        
+        The template therefore fits any DASAN/DZS OLT on the  SLE platform that
+        implements SLE-GPON-MIB (sleGpon = .1.3.6.1.4.1.6296.101.23). It does NOT  fit
+        the EPON tree (sleEpon, sleMgmt 20) or the older DSSHE platform. The CPU and
+        memory items  come from DASAN-SWITCH-MIB and are shared across DASAN devices; if
+        a given box does not implement  them those few items simply go unsupported and
+        nothing else is affected.
+        
+        Known limitation
+         ----------------
+        This firmware does not expose per-ONT byte/packet counters. The ONU performance
+         tables (sleGponOnuPMStatistics, .7.2 and .7.3) are present but return 0 for every
+        ONT, so per-subscriber  traffic graphs are not possible over SNMP until ONU
+        performance monitoring is enabled on the  OLT. The PON-layer counters that are
+        populated (BIP8, FEC) are included instead.
+        
+        Requirements
+         ------------
+        Zabbix 7.4 or newer. SNMPv2c or SNMPv3. Use bulk requests (default) - the ONT
+         walks are large.
+      vendor:
+        name: community
+        version: 7.4-1
+      groups:
+        - name: 'Templates/Net Network devices'
+      items:
+        - uuid: 4afd26cbecd541c08b9af8329757384a
+          name: 'GPON: ONTs active'
+          type: DEPENDENT
+          key: gpon.ont.count.active
+          history: 90d
+          description: 'ONTs with sleGponOnuStatus = active(2).'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var re = /^\.?1\.3\.6\.1\.4\.1\.6296\.101\.23\.3\.1\.1\.2\.[0-9.]+\s*=\s*(?:[A-Za-z0-9-]+:\s*)?(-?\d+)\s*$/;
+                  var total = 0, active = 0;
+                  value.split('\n').forEach(function (line) {
+                      var m = re.exec(line.trim());
+                      if (m) { total++; if (m[1] === '2') { active++; } }
+                  });
+                  return active;
+                  
+          master_item:
+            key: gpon.ont.walk.status
+          tags:
+            - tag: component
+              value: gpon
+        - uuid: 6690e543be8e440a92b9c2f707165890
+          name: 'GPON: ONTs inactive'
+          type: DEPENDENT
+          key: gpon.ont.count.inactive
+          history: 90d
+          description: 'Provisioned ONTs that are currently not active.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var re = /^\.?1\.3\.6\.1\.4\.1\.6296\.101\.23\.3\.1\.1\.2\.[0-9.]+\s*=\s*(?:[A-Za-z0-9-]+:\s*)?(-?\d+)\s*$/;
+                  var total = 0, active = 0;
+                  value.split('\n').forEach(function (line) {
+                      var m = re.exec(line.trim());
+                      if (m) { total++; if (m[1] === '2') { active++; } }
+                  });
+                  return (total - active);
+                  
+          master_item:
+            key: gpon.ont.walk.status
+          tags:
+            - tag: component
+              value: gpon
+        - uuid: ff9a938caacd4d29a9dab119b3b9d36a
+          name: 'GPON: ONTs total'
+          type: DEPENDENT
+          key: gpon.ont.count.total
+          history: 90d
+          description: 'Number of ONTs provisioned on the OLT.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var re = /^\.?1\.3\.6\.1\.4\.1\.6296\.101\.23\.3\.1\.1\.2\.[0-9.]+\s*=\s*(?:[A-Za-z0-9-]+:\s*)?(-?\d+)\s*$/;
+                  var total = 0, active = 0;
+                  value.split('\n').forEach(function (line) {
+                      var m = re.exec(line.trim());
+                      if (m) { total++; if (m[1] === '2') { active++; } }
+                  });
+                  return total;
+                  
+          master_item:
+            key: gpon.ont.walk.status
+          tags:
+            - tag: component
+              value: gpon
+        - uuid: cebd667df66c4a6996348d9e4deb913b
+          name: 'GPON ONT: Get discovery data'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.4.1.6296.101.23.3.1.1.4,1.3.6.1.4.1.6296.101.23.3.1.1.8,1.3.6.1.4.1.6296.101.23.3.1.1.17,1.3.6.1.4.1.6296.101.23.3.1.1.18,1.3.6.1.2.1.2.2.1.2]'
+          key: gpon.ont.walk.discovery
+          delay: 1h
+          history: '0'
+          value_type: TEXT
+          description: 'sleGponOnuSerial / Profile / ModelName / Description, plus ifDescr so the discovery rule can label each ONT with the real PON port name instead of deriving it from the ifIndex numbering scheme.'
+          timeout: 30s
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 3c3385db4da0415898074f8147cd018b
+          name: 'GPON ONT: Get PON layer statistics'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.4.1.6296.101.23.7.1.3.1.4,1.3.6.1.4.1.6296.101.23.7.1.3.1.6,1.3.6.1.4.1.6296.101.23.7.1.3.1.7]'
+          key: gpon.ont.walk.fec
+          delay: 15m
+          history: '0'
+          value_type: TEXT
+          description: 'sleGponOltStatsOnu: BIP8 errors, FEC uncorrected/corrected codewords.'
+          timeout: 30s
+          tags:
+            - tag: component
+              value: raw
+        - uuid: d536fb7c776d481bbd3e1fb2e0c334a8
+          name: 'GPON ONT: Get optical diagnostics'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.4.1.6296.101.23.6.6.1.1.16,1.3.6.1.4.1.6296.101.23.6.6.1.1.17,1.3.6.1.4.1.6296.101.23.6.6.1.1.18,1.3.6.1.4.1.6296.101.23.6.6.1.1.19,1.3.6.1.4.1.6296.101.23.6.6.1.1.20]'
+          key: gpon.ont.walk.optic
+          delay: 10m
+          history: '0'
+          value_type: TEXT
+          description: 'sleGponOnuAni DDM: temperature, voltage, Tx bias, Tx power, Rx power. Values arrive as decimal strings.'
+          timeout: 30s
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 5e5adbf516b546e19c51b5408fdb7083
+          name: 'GPON ONT: Get state'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.4.1.6296.101.23.3.1.1.10,1.3.6.1.4.1.6296.101.23.3.1.1.16,1.3.6.1.4.1.6296.101.23.3.1.1.21,1.3.6.1.4.1.6296.101.23.3.1.1.23,1.3.6.1.4.1.6296.101.23.3.1.1.51,1.3.6.1.4.1.6296.101.23.3.1.1.52]'
+          key: gpon.ont.walk.state
+          delay: 5m
+          history: '0'
+          value_type: TEXT
+          description: 'Distance, ONT Rx power, OLT Rx power, link uptime, up/down counters.'
+          timeout: 30s
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 7afb084a0ee54d8480e32f667f728bdb
+          name: 'GPON ONT: Get status'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.4.1.6296.101.23.3.1.1.2,1.3.6.1.4.1.6296.101.23.3.1.1.45]'
+          key: gpon.ont.walk.status
+          delay: 2m
+          history: '0'
+          value_type: TEXT
+          description: 'sleGponOnuStatus + sleGponOnuDeactiveReason. Kept on a short interval because ONT up/down alerting depends on it.'
+          timeout: 30s
+          tags:
+            - tag: component
+              value: raw
+        - uuid: f723a2e08ee342ddab452d435f8e9129
+          name: 'Interfaces: Get discovery data'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.2.2.1.2,1.3.6.1.2.1.31.1.1.1.18,1.3.6.1.2.1.2.2.1.3,1.3.6.1.2.1.2.2.1.8,1.3.6.1.2.1.2.2.1.7,1.3.6.1.2.1.31.1.1.1.15]'
+          key: net.if.walk.discovery
+          delay: 1h
+          history: '0'
+          value_type: TEXT
+          description: 'Raw SNMP walk feeding the network interface discovery rule.'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 54a8d1692dfa45a2b35439b376712111
+          name: 'Interfaces: Get errors and discards'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.2.2.1.14,1.3.6.1.2.1.2.2.1.20,1.3.6.1.2.1.2.2.1.13,1.3.6.1.2.1.2.2.1.19]'
+          key: net.if.walk.errors
+          delay: 3m
+          history: '0'
+          value_type: TEXT
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 25951c4b189f4281b5abb87c9428bf37
+          name: 'Interfaces: Get octet counters'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.31.1.1.1.6,1.3.6.1.2.1.31.1.1.1.10]'
+          key: net.if.walk.octets
+          history: '0'
+          value_type: TEXT
+          description: 'ifHCInOctets / ifHCOutOctets for every interface.'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 044bc1cc91b84a6ba17b8a3bb74dbf1c
+          name: 'Interfaces: Get packet counters'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.31.1.1.1.7,1.3.6.1.2.1.31.1.1.1.8,1.3.6.1.2.1.31.1.1.1.9,1.3.6.1.2.1.31.1.1.1.11,1.3.6.1.2.1.31.1.1.1.12,1.3.6.1.2.1.31.1.1.1.13]'
+          key: net.if.walk.pkts
+          history: '0'
+          value_type: TEXT
+          description: 'Unicast / multicast / broadcast packet counters, both directions.'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 7e4190864fd645688717e920a5a95f04
+          name: 'Interfaces: Get status'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.2.2.1.8,1.3.6.1.2.1.2.2.1.7,1.3.6.1.2.1.31.1.1.1.15]'
+          key: net.if.walk.status
+          history: '0'
+          value_type: TEXT
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 3e6ad6472dab4c2bac6f14a416122571
+          name: 'System: Contact'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.4.0
+          key: system.contact
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: system
+        - uuid: 8f9bef0c9e30402ab23bd5504ae4f72a
+          name: 'CPU: Load 1m'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.9.0
+          key: system.cpu.load1m
+          history: 7d
+          value_type: FLOAT
+          units: '%'
+          description: dsCpuLoad1m.
+          tags:
+            - tag: component
+              value: cpu
+          triggers:
+            - uuid: d8bb03c0d80f4bc9921634a461628aae
+              expression: 'min(/DASAN GPON OLT SLE by SNMP/system.cpu.load1m,10m)>{$CPU.UTIL.CRIT}'
+              name: 'CPU: High CPU utilization'
+              event_name: 'CPU: High CPU utilization (>{$CPU.UTIL.CRIT}% for 10m)'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+        - uuid: e4460e69588745a897062b49602b8f8f
+          name: 'CPU: Load 5s'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.8.0
+          key: system.cpu.load5s
+          history: 7d
+          value_type: FLOAT
+          units: '%'
+          description: dsCpuLoad5s.
+          tags:
+            - tag: component
+              value: cpu
+        - uuid: b8dcaf48157f4146baf67a60174430cc
+          name: 'CPU: Load 10m'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.10.0
+          key: system.cpu.load10m
+          history: 7d
+          value_type: FLOAT
+          units: '%'
+          description: dsCpuLoad10m.
+          tags:
+            - tag: component
+              value: cpu
+        - uuid: 70a6844e2d6446b0bdaa63ef76f622f7
+          name: 'System: Description'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.1.0
+          key: system.descr
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: 'SNMPv2-MIB::sysDescr.0, e.g. "V8102_SFU NOS 2.13 #0099/d0:96:fb:b3:d4:82".'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: system
+        - uuid: 12f4d452cd13457b8af278811795c7ae
+          name: 'Inventory: Firmware version'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.20.0
+          key: system.hw.firmware
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: dsFirmwareVersion.
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: inventory
+        - uuid: 789b4721b1ea4e0c8419ada037c68936
+          name: 'Inventory: Hardware model'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.17.0
+          key: system.hw.model
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: 'dsHardwareVersion, e.g. "DS-F6-63G-A1(O)".'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: inventory
+        - uuid: c52ecfe2d8cd4b9bba5d579cd20946e9
+          name: 'Inventory: Serial number'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.19.0
+          key: system.hw.serial
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: dsSerialNumber.
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: inventory
+        - uuid: de4007badbcc4e36a3888be47fa33d8f
+          name: 'System: Location'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.6.0
+          key: system.location
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: system
+        - uuid: 3fee8bfd59a34cd690bc6a9f274e972c
+          name: 'System: Name'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.5.0
+          key: system.name
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: 'SNMPv2-MIB::sysName.0'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: system
+        - uuid: 5be84777eb42481ba239c007e14b550c
+          name: 'System: Uptime (network)'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.3.0
+          key: system.net.uptime
+          history: 7d
+          value_type: FLOAT
+          units: uptime
+          description: 'DISMAN-EVENT-MIB::sysUpTimeInstance - time since the network management portion of the system was last re-initialized.'
+          preprocessing:
+            - type: MULTIPLIER
+              parameters:
+                - '0.01'
+          tags:
+            - tag: component
+              value: system
+          triggers:
+            - uuid: 3bb2b6292b7e4d658e169a204d231e03
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/system.net.uptime)<10m'
+              name: 'System: Device has been restarted'
+              priority: WARNING
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 0eb629ed269d422c8cfd6d029435ea71
+          name: 'Inventory: OS version'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.3.0
+          key: system.sw.os
+          delay: 1h
+          history: 7d
+          value_type: CHAR
+          description: 'dsOsVersion, e.g. "2.13 #0099".'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          tags:
+            - tag: component
+              value: inventory
+          triggers:
+            - uuid: 7659ce5a0f124bf488b6e873a795f4a1
+              expression: 'change(/DASAN GPON OLT SLE by SNMP/system.sw.os)=1 and length(last(/DASAN GPON OLT SLE by SNMP/system.sw.os))>0'
+              name: 'Inventory: OS version has changed'
+              priority: INFO
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: notice
+        - uuid: 13996499dd8e45c692cee4e1bf3db7b3
+          name: 'Memory: Free'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.16.0
+          key: vm.memory.free
+          delay: 5m
+          history: 7d
+          units: B
+          description: dsFreeMem.
+          tags:
+            - tag: component
+              value: memory
+        - uuid: 416ab4e90287441581a953eb32776230
+          name: 'Memory: Total'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.14.0
+          key: vm.memory.total
+          delay: 5m
+          history: 7d
+          units: B
+          description: dsTotalMem.
+          tags:
+            - tag: component
+              value: memory
+        - uuid: e82e93681ff145d8ac794a7e9f31522e
+          name: 'Memory: Used'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.6296.9.1.1.1.15.0
+          key: vm.memory.used
+          delay: 5m
+          history: 7d
+          units: B
+          description: dsUsedMem.
+          tags:
+            - tag: component
+              value: memory
+        - uuid: 44a971c2d7a547a39a9d15482fc34832
+          name: 'Memory: Utilization'
+          type: CALCULATED
+          key: vm.memory.util
+          delay: 5m
+          history: 7d
+          value_type: FLOAT
+          units: '%'
+          params: '100*last(//vm.memory.used)/last(//vm.memory.total)'
+          tags:
+            - tag: component
+              value: memory
+          triggers:
+            - uuid: 2fbb480fd0044b7fa8463c1079ce0fa6
+              expression: 'min(/DASAN GPON OLT SLE by SNMP/vm.memory.util,10m)>{$MEMORY.UTIL.MAX}'
+              name: 'Memory: High memory utilization'
+              event_name: 'Memory: High memory utilization (>{$MEMORY.UTIL.MAX}% for 10m)'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: performance
+        - uuid: eb068f180dde4819b676660af407c7bc
+          name: 'SNMP: Agent availability'
+          type: INTERNAL
+          key: 'zabbix[host,snmp,available]'
+          history: 7d
+          trends: '0'
+          valuemap:
+            name: zabbix.host.available
+          tags:
+            - tag: component
+              value: availability
+          triggers:
+            - uuid: fe77a0717bfc41ad944b32ef69c8a8e1
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/zabbix[host,snmp,available])=0'
+              name: 'SNMP: No SNMP data collection'
+              priority: AVERAGE
+              description: 'SNMP is not responding on the OLT.'
+              tags:
+                - tag: scope
+                  value: availability
+      discovery_rules:
+        - uuid: 8d1f1d5d7cf84a048bd5ae6d7bb46f61
+          name: 'GPON ONT discovery'
+          type: DEPENDENT
+          key: gpon.ont.discovery
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: '{#ONTDESC}'
+                value: '{$GPON.ONT.DESC.MATCHES}'
+              - macro: '{#ONTDESC}'
+                value: '{$GPON.ONT.DESC.NOT_MATCHES}'
+                operator: NOT_MATCHES_REGEX
+          description: |
+            Discovers every ONT provisioned on the OLT from sleGponOnuTable, on any number of PON ports.
+            
+            The SNMP index is <ponIfIndex>.<ontId>. A JavaScript step splits it into {#PONIFINDEX}/{#ONTID} and resolves {#PONPORT} from ifDescr, so the port label is whatever the device itself calls the port (e.g. GPON1/7) instead of being derived from the ifIndex numbering scheme.
+            
+            Use {$GPON.ONT.DESC.MATCHES} / {$GPON.ONT.DESC.NOT_MATCHES} to narrow the set, and disable item prototypes you do not need - every prototype is multiplied by the ONT count (1767 on the reference OLT).
+          item_prototypes:
+            - uuid: 44c011e3efb64cdb849caed07383d35e
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Optical module bias current'
+              type: DEPENDENT
+              key: 'gpon.ont.bias[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: mA
+              description: sleGponOnuAniOpticModuleTxbias.
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.6.6.1.1.18.{#SNMPINDEX}.1'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: TRIM
+                  parameters:
+                    - '" '
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: b38d6497d95a4221b51987c0da3d7cf5
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: BIP8 errors'
+              type: DEPENDENT
+              key: 'gpon.ont.bip8[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              description: 'sleGponOltStatsOnuPonBip8Errors, per second.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.7.1.3.1.4.{#SNMPINDEX}'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: gpon.ont.walk.fec
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: df9f01da8a8d4e52a1b0426c23bb168b
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Deactivation reason'
+              type: DEPENDENT
+              key: 'gpon.ont.deactive.reason[{#SNMPINDEX}]'
+              history: 90d
+              description: 'sleGponOnuDeactiveReason. Explains why an ONT left the active state - dgi(2) = dying gasp (power cut at the subscriber), losi(3)/los(100) = loss of signal (fibre problem), lofi(4) = loss of frame.'
+              valuemap:
+                name: 'GPON ONT deactivation reason'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.45.{#SNMPINDEX}'
+                    - '0'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 6h
+              master_item:
+                key: gpon.ont.walk.status
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: 6ac9298b1e4b4cfeabe15cee4864b4cc
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Distance'
+              type: DEPENDENT
+              key: 'gpon.ont.distance[{#SNMPINDEX}]'
+              history: 7d
+              units: m
+              description: 'sleGponOnuDistance - fibre distance from the OLT in metres.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.10.{#SNMPINDEX}'
+                    - '0'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 6h
+              master_item:
+                key: gpon.ont.walk.state
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: c910fa4ddb474662a1040cdb6aadb4ed
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Link down count'
+              type: DEPENDENT
+              key: 'gpon.ont.downcount[{#SNMPINDEX}]'
+              history: 90d
+              description: 'sleGponOnuDownCount - increments every time the ONT drops. Used for flapping detection.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.52.{#SNMPINDEX}'
+                    - '0'
+              master_item:
+                key: gpon.ont.walk.state
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+              trigger_prototypes:
+                - uuid: b9523adc5dd2432d83c87cb13b270f5c
+                  expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.ont.downcount[{#SNMPINDEX}])-min(/DASAN GPON OLT SLE by SNMP/gpon.ont.downcount[{#SNMPINDEX}],1h))>{$GPON.ONT.FLAP.COUNT}'
+                  name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is flapping'
+                  event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: more than {$GPON.ONT.FLAP.COUNT} link drops in the last hour'
+                  priority: AVERAGE
+                  manual_close: 'YES'
+                  tags:
+                    - tag: scope
+                      value: availability
+            - uuid: 1bab550542e6409b8ed1c8e961d77a6d
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: FEC corrected codewords'
+              type: DEPENDENT
+              key: 'gpon.ont.fec.corrected[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              description: 'sleGponOltStatsOnuPonFecCorrectedCodewords, per second.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.7.1.3.1.7.{#SNMPINDEX}'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: gpon.ont.walk.fec
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: 5eb1d3b0545f4e4b8242141be8e072a2
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: FEC uncorrectable codewords'
+              type: DEPENDENT
+              key: 'gpon.ont.fec.uncorrected[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              description: 'sleGponOltStatsOnuPonFecUncorrectedCodewords, per second. A non-zero rate means the link is losing data - check the optical budget.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.7.1.3.1.6.{#SNMPINDEX}'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: gpon.ont.walk.fec
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+              trigger_prototypes:
+                - uuid: 02419525e1584d69a576642c078aaca7
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.fec.uncorrected[{#SNMPINDEX}],30m)>0'
+                  name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: FEC uncorrectable codewords are increasing'
+                  priority: AVERAGE
+                  description: 'Sustained uncorrectable FEC errors mean real data loss on the PON link for this ONT.'
+                  manual_close: 'YES'
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: f34fa3a947fa42d19a2b699a53f1cece
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Rx power (OLT side)'
+              type: DEPENDENT
+              key: 'gpon.ont.oltrxpower[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: dBm
+              description: 'sleGponOnuOltRxPower - upstream power from this ONT as received by the OLT (0.1 dBm units). Offline ONTs report -400 (-40 dBm).'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.21.{#SNMPINDEX}'
+                    - '0'
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.1'
+              master_item:
+                key: gpon.ont.walk.state
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: 5c26de47192a4c3cb27c9d78ac5b5d82
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Rx power (ONT)'
+              type: DEPENDENT
+              key: 'gpon.ont.rxpower[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: dBm
+              description: 'sleGponOnuAniOpticModuleRxPower - downstream optical power measured by the ONT itself. This is the number to watch for fibre/splitter loss.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.6.6.1.1.20.{#SNMPINDEX}.1'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: TRIM
+                  parameters:
+                    - '" '
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: c9e033a576374bfcaa3f2826d7d9071e
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Status'
+              type: DEPENDENT
+              key: 'gpon.ont.status[{#SNMPINDEX}]'
+              history: 90d
+              description: 'sleGponOnuStatus. active(2) is the normal running state.'
+              valuemap:
+                name: 'GPON ONT status'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.2.{#SNMPINDEX}'
+                    - '0'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 6h
+              master_item:
+                key: gpon.ont.walk.status
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+              trigger_prototypes:
+                - uuid: 1ad0e4a1b1314b7795b88bec5794a49b
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+                  name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  priority: WARNING
+                  description: |
+                    sleGponOnuStatus left active(2). Check the "Deactivation reason" item to tell a customer power cut (dying gasp) from a fibre fault (LOS).
+                    
+                    The trigger only fires for ONTs seen active within {$GPON.ONT.DOWN.LOOKBACK}, so provisioned-but-never-connected entries stay quiet. On a fresh install nothing fires until enough history has accumulated - that is intentional.
+                  manual_close: 'YES'
+                  tags:
+                    - tag: scope
+                      value: availability
+            - uuid: 4ac9bf57f35d4dce87ec15a8feb44c58
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Optical module temperature'
+              type: DEPENDENT
+              key: 'gpon.ont.temp[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: °C
+              description: sleGponOnuAniOpticModuleTemper.
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.6.6.1.1.16.{#SNMPINDEX}.1'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: TRIM
+                  parameters:
+                    - '" '
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+              trigger_prototypes:
+                - uuid: 0d27d274fbd84b58b8c2b255d965a23b
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.temp[{#SNMPINDEX}],15m)>{$GPON.ONT.TEMP.MAX}'
+                  name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Optical module temperature is too high'
+                  event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: optical module temperature is above {$GPON.ONT.TEMP.MAX} °C'
+                  priority: WARNING
+                  manual_close: 'YES'
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: 2847e912fda1472892ebea73bbc6424a
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Tx power (ONT)'
+              type: DEPENDENT
+              key: 'gpon.ont.txpower[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: dBm
+              description: 'sleGponOnuAniOpticModuleTxPower - upstream power transmitted by the ONT.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.6.6.1.1.19.{#SNMPINDEX}.1'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: TRIM
+                  parameters:
+                    - '" '
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: f6b5b81a8fb447868dab61db9f983e5d
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Link up count'
+              type: DEPENDENT
+              key: 'gpon.ont.upcount[{#SNMPINDEX}]'
+              history: 90d
+              description: sleGponOnuUpCount.
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.51.{#SNMPINDEX}'
+                    - '0'
+              master_item:
+                key: gpon.ont.walk.state
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: 401bad527f8942ad89839c910ef4c1c4
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Link uptime'
+              type: DEPENDENT
+              key: 'gpon.ont.uptime[{#SNMPINDEX}]'
+              history: 7d
+              units: uptime
+              description: 'sleGponOnuLinkUpTime - seconds since the ONT came up.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.3.1.1.23.{#SNMPINDEX}'
+                    - '0'
+              master_item:
+                key: gpon.ont.walk.state
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+            - uuid: ee2a945ab8d74322a3b14054e8a11fb2
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Optical module voltage'
+              type: DEPENDENT
+              key: 'gpon.ont.voltage[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: V
+              description: sleGponOnuAniOpticModuleVoltage.
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.4.1.6296.101.23.6.6.1.1.17.{#SNMPINDEX}.1'
+                    - '0'
+                  error_handler: DISCARD_VALUE
+                - type: TRIM
+                  parameters:
+                    - '" '
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: ont
+                  value: '{#PONPORT}:{#ONTID}'
+                - tag: pon-port
+                  value: '{#PONPORT}'
+          trigger_prototypes:
+            - uuid: 758945c1bc75463ba5c178c275e9538d
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],1h)<avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],7d:now-1h)-{$GPON.RX.DROP}'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power dropped against its own baseline'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power fell more than {$GPON.RX.DROP} dB below its 7-day average'
+              priority: AVERAGE
+              description: 'Compares the last hour against the previous 7 days for this specific ONT, so it detects a degrading splice, a bent patchcord or a dirty connector regardless of the absolute level. Needs about a week of history before it becomes meaningful.'
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: fa004fe426404adaa367a7711cd8c308
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)<{$GPON.ONT.RX.CRIT}'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>({$GPON.ONT.RX.CRIT}+1)'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is critically low'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is below {$GPON.ONT.RX.CRIT} dBm'
+              priority: AVERAGE
+              description: |
+                Downstream power measured by the ONT itself.
+                
+                Deliberately NOT gated on asymmetry - this is the absolute floor, so an ONT at a genuinely bad level stays visible even when its loss is symmetric. The warning-level trigger carries the asymmetry gate.
+                
+                Recovery needs 1 dB of margin past the threshold so the trigger does not flap.
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: 7ff3943656ef450ebdcf56f3aeaf902c
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)<{$GPON.ONT.RX.MIN} and (avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)-avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m))>{$GPON.RX.ASYM.MIN}'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>({$GPON.ONT.RX.MIN}+1) or (avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)-avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m))<={$GPON.RX.ASYM.MIN}'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is low'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is below {$GPON.ONT.RX.MIN} dBm'
+              priority: WARNING
+              description: |
+                Downstream power measured by the ONT itself.
+                
+                Recovery needs 1 dB of margin past the threshold so the trigger does not flap.
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is critically low'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)<{$GPON.ONT.RX.CRIT}'
+                  recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>({$GPON.ONT.RX.CRIT}+1)'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: 723c661b899d4cccb38c998f52548562
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>{$GPON.ONT.RX.MAX}'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)<({$GPON.ONT.RX.MAX}-1)'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is too high'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is above {$GPON.ONT.RX.MAX} dBm'
+              priority: WARNING
+              description: |
+                The ONT may sit too close to the OLT or an attenuator is missing - the receiver can saturate.
+                
+                Recovery needs 1 dB of margin past the threshold so the trigger does not flap.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: 2b1f9ffe7c1444119133c5ba651c00f4
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],1h)<avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],7d:now-1h)-{$GPON.RX.DROP}'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Upstream power at the OLT dropped against its baseline'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: OLT Rx power fell more than {$GPON.RX.DROP} dB below its 7-day average'
+              status: DISABLED
+              priority: AVERAGE
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: e946554077cf402b9348b12085c847fe
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)<{$GPON.OLT.RX.CRIT}'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)>({$GPON.OLT.RX.CRIT}+1)'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Upstream power at the OLT is critically low'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: OLT Rx power is below {$GPON.OLT.RX.CRIT} dBm'
+              status: DISABLED
+              priority: AVERAGE
+              description: |
+                Upstream power from this ONT as received by the OLT. Compare it with other ONTs on the same PON port, NOT with the ONT Rx value - upstream runs several dB lower by design.
+                
+                Recovery needs 1 dB of margin past the threshold so the trigger does not flap.
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: c38930cb8c764060aec796221ae471bf
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)<{$GPON.OLT.RX.MIN}'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)>({$GPON.OLT.RX.MIN}+1)'
+              name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Upstream power at the OLT is low'
+              event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: OLT Rx power is below {$GPON.OLT.RX.MIN} dBm'
+              status: DISABLED
+              priority: WARNING
+              description: |
+                Upstream power from this ONT as received by the OLT. Compare it with other ONTs on the same PON port, NOT with the ONT Rx value - upstream runs several dB lower by design.
+                
+                Recovery needs 1 dB of margin past the threshold so the trigger does not flap.
+              manual_close: 'YES'
+              dependencies:
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
+                - name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: Upstream power at the OLT is critically low'
+                  expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])=2 and max(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)<{$GPON.OLT.RX.CRIT}'
+                  recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m)>({$GPON.OLT.RX.CRIT}+1)'
+              tags:
+                - tag: scope
+                  value: performance
+          master_item:
+            key: gpon.ont.walk.discovery
+          preprocessing:
+            - type: SNMP_WALK_TO_JSON
+              parameters:
+                - '{#ONTSERIAL}'
+                - 1.3.6.1.4.1.6296.101.23.3.1.1.4
+                - '0'
+                - '{#ONTPROFILE}'
+                - 1.3.6.1.4.1.6296.101.23.3.1.1.8
+                - '0'
+                - '{#ONTMODEL}'
+                - 1.3.6.1.4.1.6296.101.23.3.1.1.17
+                - '0'
+                - '{#ONTDESC}'
+                - 1.3.6.1.4.1.6296.101.23.3.1.1.18
+                - '0'
+                - '{#PONPORT}'
+                - 1.3.6.1.2.1.2.2.1.2
+                - '0'
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var rows = JSON.parse(value);
+                  var strip = function (s) {
+                      return String(s ===  undefined || s === null ? '' : s)
+                          .replace(/^["\s]+|["\s]+$/g, '');
+                   };
+                  
+                  // The walk mixes two index shapes: a bare ifIndex for ifDescr rows and
+                  // <ifIndex>.<ontId>  for the ONU table. Build the port-name map from the former,
+                  // then emit only the  latter.
+                  var portName = {};
+                  var onts = [];
+                  rows.forEach(function (row) {
+                      var  idx = String(row['{#SNMPINDEX}'] || '');
+                      if (idx.indexOf('.') === -1) {
+                           portName[idx] = strip(row['{#PONPORT}']);
+                      } else {
+                          onts.push(row);
+                       }
+                  });
+                  
+                  onts.forEach(function (row) {
+                      ['{#ONTSERIAL}', '{#ONTPROFILE}',  '{#ONTMODEL}', '{#ONTDESC}']
+                          .forEach(function (m) { row[m] = strip(row[m]);  });
+                      var parts = String(row['{#SNMPINDEX}']).split('.');
+                      row['{#PONIFINDEX}']  = parts[0];
+                      row['{#ONTID}'] = parts[1];
+                      row['{#PONPORT}'] = portName[parts[0]]  || ('ifIndex' + parts[0]);
+                      if (!row['{#ONTDESC}']) {
+                          row['{#ONTDESC}']  = row['{#ONTSERIAL}'];
+                      }
+                  });
+                  return JSON.stringify(onts);
+        - uuid: 6c6d227483f14f028110c24eb712be4d
+          name: 'GPON PON port discovery'
+          type: DEPENDENT
+          key: gpon.pon.discovery
+          filter:
+            conditions:
+              - macro: '{#IFDESCR}'
+                value: '{$GPON.PON.DESCR.MATCHES}'
+          description: 'Discovers just the PON ports, so per-port ONT counters can exist as individual items. Reuses the interface walk - no extra SNMP traffic.'
+          item_prototypes:
+            - uuid: 150b4380392c4c4b874532b82891fea9
+              name: 'PON {#IFDESCR}: Active ONTs'
+              type: DEPENDENT
+              key: 'gpon.pon.ont.active[{#SNMPINDEX}]'
+              history: 90d
+              description: 'Number of ONTs in state active(2) on this PON port.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var re = /^\.?1\.3\.6\.1\.4\.1\.6296\.101\.23\.3\.1\.1\.2\.{#SNMPINDEX}\.[0-9]+\s*=\s*(?:[A-Za-z0-9-]+:\s*)?(-?\d+)\s*$/;
+                      var active = 0;
+                      value.split('\n').forEach(function (line) {
+                          var m = re.exec(line.trim());
+                          if (m && m[1] === '2') { active++; }
+                      });
+                      return active;
+                      
+              master_item:
+                key: gpon.ont.walk.status
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: pon-port
+                  value: '{#IFDESCR}'
+          trigger_prototypes:
+            - uuid: 3262887f03174e3cafb6a81238c06b54
+              expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.pon.ont.active[{#SNMPINDEX}],#2)-last(/DASAN GPON OLT SLE by SNMP/gpon.pon.ont.active[{#SNMPINDEX}]))>={$GPON.PON.DROP} and last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total)=last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total,#2)'
+              name: 'PON {#IFDESCR}: {$GPON.PON.DROP} or more ONTs went inactive at once'
+              event_name: 'PON {#IFDESCR}: {$GPON.PON.DROP}+ ONTs went inactive between two checks'
+              priority: HIGH
+              description: |
+                A simultaneous drop on one PON port points at the feeder fibre, the splitter or a power cut in one building - not at individual subscribers.
+                
+                Guarded on gpon.ont.count.total being unchanged: a truncated SNMP walk lowers the per-port count too, and that must not look like an outage.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+          master_item:
+            key: net.if.walk.discovery
+          preprocessing:
+            - type: SNMP_WALK_TO_JSON
+              parameters:
+                - '{#IFDESCR}'
+                - 1.3.6.1.2.1.2.2.1.2
+                - '0'
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var rows = JSON.parse(value);
+                  rows.forEach(function (row) {
+                      row['{#IFDESCR}'] = String(row['{#IFDESCR}'] || '')
+                          .replace(/^["\s]+|["\s]+$/g, '');
+                  });
+                  return JSON.stringify(rows);
+                  
+        - uuid: aa67ee6ea12d4dd394a17a205f9230b6
+          name: 'Network interfaces discovery'
+          type: DEPENDENT
+          key: net.if.discovery
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: '{#IFDESCR}'
+                value: '{$IF.DESCR.MATCHES}'
+              - macro: '{#IFDESCR}'
+                value: '{$IF.DESCR.NOT_MATCHES}'
+                operator: NOT_MATCHES_REGEX
+              - macro: '{#IFHIGHSPEED}'
+                value: '{$IF.HIGHSPEED.NOT_MATCHES}'
+                operator: NOT_MATCHES_REGEX
+          description: |
+            Discovers physical ports on any SLE-platform box, regardless of how the ports are named (XE/GE/TE/GPON/PON...).
+            
+            The default filter keeps every interface whose ifHighSpeed is non-zero. On this platform that is exactly the set of real ports: the internal bridge interfaces (br*, default), the loopback and the channel group report speed 0, while ports that are merely operationally down still report their nominal speed - so nothing real is lost.
+            
+            Use {$IF.DESCR.MATCHES} / {$IF.DESCR.NOT_MATCHES} to narrow the set further, e.g. "^GPON" for PON ports only.
+          item_prototypes:
+            - uuid: 313527ea1c584f0b8cf1d82bfab99e59
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Administrative status'
+              type: DEPENDENT
+              key: 'net.if.adminstatus[{#SNMPINDEX}]'
+              history: 7d
+              description: ifAdminStatus.
+              valuemap:
+                name: 'IF-MIB::ifAdminStatus'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.7.{#SNMPINDEX}'
+                    - '0'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1d
+              master_item:
+                key: net.if.walk.status
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 64a9c0350fb04f8084823ed841605452
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound broadcast packets'
+              type: DEPENDENT
+              key: 'net.if.in.bcast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.9.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+              trigger_prototypes:
+                - uuid: 319b8f1b22284923a4aee8951f2546a5
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/net.if.in.bcast[{#SNMPINDEX}],5m)>{$IF.BCAST.WARN}'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/net.if.in.bcast[{#SNMPINDEX}],5m)<{$IF.BCAST.WARN}*0.8'
+                  name: 'Interface {#IFDESCR}({#IFALIAS}): Broadcast storm suspected'
+                  event_name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound broadcast rate is above {$IF.BCAST.WARN} pps'
+                  priority: AVERAGE
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: a1fed9f327b848cfbeeb785c63113fa1
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound packets discarded'
+              type: DEPENDENT
+              key: 'net.if.in.discards[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.13.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.errors
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: bc0002a3671b4b8f9510ad29c3325f03
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound packets with errors'
+              type: DEPENDENT
+              key: 'net.if.in.errors[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.14.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.errors
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+              trigger_prototypes:
+                - uuid: f2dce23634e34c9a897a04a494864b44
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/net.if.in.errors[{#SNMPINDEX}],5m)>{$IF.ERRORS.WARN}'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/net.if.in.errors[{#SNMPINDEX}],5m)<{$IF.ERRORS.WARN}*0.8'
+                  name: 'Interface {#IFDESCR}({#IFALIAS}): High inbound error rate'
+                  priority: WARNING
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: 3fb36321ea284c2cabac07054f26f3e1
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound multicast packets'
+              type: DEPENDENT
+              key: 'net.if.in.mcast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.8.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 7339fe16d8ee479abaeff9e7c3581365
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound unicast packets'
+              type: DEPENDENT
+              key: 'net.if.in.ucast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.7.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: d85bd5fdc50a421599551fd1277cb08f
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Inbound utilization'
+              type: CALCULATED
+              key: 'net.if.in.util[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '%'
+              params: '100*last(//net.if.in[{#SNMPINDEX}])/last(//net.if.speed[{#SNMPINDEX}])'
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+              trigger_prototypes:
+                - uuid: 9d633fcd30184d2daabcb0d79108e7d3
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/net.if.in.util[{#SNMPINDEX}],15m)>{$IF.UTIL.MAX}'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/net.if.in.util[{#SNMPINDEX}],15m)<{$IF.UTIL.MAX}*0.9'
+                  name: 'Interface {#IFDESCR}({#IFALIAS}): High inbound utilization'
+                  event_name: 'Interface {#IFDESCR}({#IFALIAS}): High inbound utilization (>{$IF.UTIL.MAX}% for 15m)'
+                  priority: WARNING
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: 941e57d027fb4e63bff2fb91b4083fe0
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Bits received'
+              type: DEPENDENT
+              key: 'net.if.in[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: bps
+              description: 'ifHCInOctets converted to bits per second.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+              master_item:
+                key: net.if.walk.octets
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: e558d29a621e4d78b0b4efec904fab67
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound broadcast packets'
+              type: DEPENDENT
+              key: 'net.if.out.bcast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.13.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: ab6a6b029ae34aa3b7333cbf44fe4024
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound packets discarded'
+              type: DEPENDENT
+              key: 'net.if.out.discards[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.19.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.errors
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 0ee0d9661a284f70bb6db4069f385ead
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound packets with errors'
+              type: DEPENDENT
+              key: 'net.if.out.errors[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.20.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.errors
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: ebbdb1125bf242b583745c9242cc4cda
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound multicast packets'
+              type: DEPENDENT
+              key: 'net.if.out.mcast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.12.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: c7a7740dc9dc4e7db342c652f9c26829
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound unicast packets'
+              type: DEPENDENT
+              key: 'net.if.out.ucast[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '!pps'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.11.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+              master_item:
+                key: net.if.walk.pkts
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 54f364d45a5742e282e1fd1285a367e1
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Outbound utilization'
+              type: CALCULATED
+              key: 'net.if.out.util[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: '%'
+              params: '100*last(//net.if.out[{#SNMPINDEX}])/last(//net.if.speed[{#SNMPINDEX}])'
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+              trigger_prototypes:
+                - uuid: 50c6695af7564688993bf109fbf991e1
+                  expression: 'min(/DASAN GPON OLT SLE by SNMP/net.if.out.util[{#SNMPINDEX}],15m)>{$IF.UTIL.MAX}'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/net.if.out.util[{#SNMPINDEX}],15m)<{$IF.UTIL.MAX}*0.9'
+                  name: 'Interface {#IFDESCR}({#IFALIAS}): High outbound utilization'
+                  event_name: 'Interface {#IFDESCR}({#IFALIAS}): High outbound utilization (>{$IF.UTIL.MAX}% for 15m)'
+                  priority: WARNING
+                  tags:
+                    - tag: scope
+                      value: performance
+            - uuid: f74b8f521107438cb1c830a60def1df8
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Bits sent'
+              type: DEPENDENT
+              key: 'net.if.out[{#SNMPINDEX}]'
+              history: 7d
+              value_type: FLOAT
+              units: bps
+              description: 'ifHCOutOctets converted to bits per second.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}'
+                    - '0'
+                - type: CHANGE_PER_SECOND
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+              master_item:
+                key: net.if.walk.octets
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 687bf5fbdb3a470a8379e741a33a6280
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Speed'
+              type: DEPENDENT
+              key: 'net.if.speed[{#SNMPINDEX}]'
+              history: 7d
+              units: bps
+              description: 'ifHighSpeed x 1000000. Note: GPON ports report 2500 Mbps, which is the downstream line rate. The upstream line rate is 1.25 Gbps, so inbound utilization on a PON port is understated by roughly a factor of two.'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.31.1.1.1.15.{#SNMPINDEX}'
+                    - '0'
+                - type: MULTIPLIER
+                  parameters:
+                    - '1000000'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1d
+              master_item:
+                key: net.if.walk.status
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+            - uuid: 27da443425304d4aac797343e2d5e1f8
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Operational status'
+              type: DEPENDENT
+              key: 'net.if.status[{#SNMPINDEX}]'
+              history: 7d
+              description: ifOperStatus.
+              valuemap:
+                name: 'IF-MIB::ifOperStatus'
+              preprocessing:
+                - type: SNMP_WALK_VALUE
+                  parameters:
+                    - '1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}'
+                    - '0'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1d
+              master_item:
+                key: net.if.walk.status
+              tags:
+                - tag: component
+                  value: network
+                - tag: interface
+                  value: '{#IFDESCR}'
+          trigger_prototypes:
+            - uuid: f53b33c1e2d845a78bcbcfeaf66f5669
+              expression: 'last(/DASAN GPON OLT SLE by SNMP/net.if.status[{#SNMPINDEX}])=2 and last(/DASAN GPON OLT SLE by SNMP/net.if.adminstatus[{#SNMPINDEX}])=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'last(/DASAN GPON OLT SLE by SNMP/net.if.status[{#SNMPINDEX}])<>2'
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Link down'
+              priority: WARNING
+              description: 'The interface is administratively up but operationally down.'
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+          graph_prototypes:
+            - uuid: fc91a42dd3b94214a82d2de9e0ffa336
+              name: 'Interface {#IFDESCR}({#IFALIAS}): Network traffic'
+              graph_items:
+                - drawtype: FILLED_REGION
+                  color: 199C0D
+                  calc_fnc: ALL
+                  item:
+                    host: 'DASAN GPON OLT SLE by SNMP'
+                    key: 'net.if.in[{#SNMPINDEX}]'
+                - sortorder: '1'
+                  color: '891515'
+                  calc_fnc: ALL
+                  item:
+                    host: 'DASAN GPON OLT SLE by SNMP'
+                    key: 'net.if.out[{#SNMPINDEX}]'
+                - sortorder: '2'
+                  color: FF8000
+                  calc_fnc: ALL
+                  item:
+                    host: 'DASAN GPON OLT SLE by SNMP'
+                    key: 'net.if.in.errors[{#SNMPINDEX}]'
+                - sortorder: '3'
+                  color: 2774A4
+                  calc_fnc: ALL
+                  item:
+                    host: 'DASAN GPON OLT SLE by SNMP'
+                    key: 'net.if.out.errors[{#SNMPINDEX}]'
+          master_item:
+            key: net.if.walk.discovery
+          preprocessing:
+            - type: SNMP_WALK_TO_JSON
+              parameters:
+                - '{#IFDESCR}'
+                - 1.3.6.1.2.1.2.2.1.2
+                - '0'
+                - '{#IFALIAS}'
+                - 1.3.6.1.2.1.31.1.1.1.18
+                - '0'
+                - '{#IFTYPE}'
+                - 1.3.6.1.2.1.2.2.1.3
+                - '0'
+                - '{#IFOPERSTATUS}'
+                - 1.3.6.1.2.1.2.2.1.8
+                - '0'
+                - '{#IFADMINSTATUS}'
+                - 1.3.6.1.2.1.2.2.1.7
+                - '0'
+                - '{#IFHIGHSPEED}'
+                - 1.3.6.1.2.1.31.1.1.1.15
+                - '0'
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var rows = JSON.parse(value);
+                  rows.forEach(function (row) {
+                      ['{#IFDESCR}', '{#IFALIAS}'].forEach(function  (m) {
+                          row[m] = String(row[m] === undefined || row[m] === null ? '' : row[m])
+                               .replace(/^["\s]+|["\s]+$/g, '');
+                      });
+                  });
+                  return JSON.stringify(rows);
+      macros:
+        - macro: '{$CPU.UTIL.CRIT}'
+          value: '90'
+          description: 'CPU utilization trigger threshold, %.'
+        - macro: '{$GPON.OLT.RX.CRIT}'
+          value: '-32'
+          description: 'Critical threshold for the upstream power at the OLT, dBm. -32 dBm is the receiver sensitivity of GPON class C+ optics, so below this the link is out of spec. Use -28 instead if the OLT is fitted with class B+ optics.'
+        - macro: '{$GPON.OLT.RX.MIN}'
+          value: '-30.5'
+          description: |
+            Warning threshold for the upstream power the OLT receives from an ONT, dBm.
+            IMPORTANT: upstream is NOT comparable with downstream. The ONT transmits at about +2.5 dBm while the OLT transmits several dB harder, so the upstream reading sits systematically lower. On the reference OLT the median ONT Rx is -21.1 dBm while the median OLT Rx is -26.5 dBm - a healthy 5.4 dB gap.
+            Measured distribution: median -26.5, 5th pct -30.4, 1st pct -32.2, worst -33.9. This default flags the worst ~4%. Do not reuse the ONT Rx threshold here - a value like -28 dBm sits in the middle of the healthy population and would alarm on a quarter of the estate.
+        - macro: '{$GPON.ONT.ACTIVE.MIN}'
+          value: '80'
+          description: 'Minimum share of provisioned ONTs that should be active, %.'
+        - macro: '{$GPON.ONT.DESC.MATCHES}'
+          value: '.*'
+          description: 'ONTs whose sleGponOnuDescription matches this regexp are discovered.'
+        - macro: '{$GPON.ONT.DESC.NOT_MATCHES}'
+          value: CHANGE_IF_NEEDED
+          description: 'ONTs whose sleGponOnuDescription matches this regexp are NOT discovered.'
+        - macro: '{$GPON.ONT.DOWN.LOOKBACK}'
+          value: 7d
+          description: 'An ONT only raises a down alarm if it was seen active within this window. Keeps provisioned-but-never-connected entries out of the problem list (185 of 1767 on the reference OLT).'
+        - macro: '{$GPON.ONT.FLAP.COUNT}'
+          value: '3'
+          description: 'Number of link drops within one hour that counts as flapping.'
+        - macro: '{$GPON.ONT.MASS.DROP}'
+          value: '100'
+          description: 'How many active ONTs may disappear OLT-wide between two checks before it is treated as a mass outage. At this scale it is a feeder fibre, a card or a power event, not subscribers switching off.'
+        - macro: '{$GPON.ONT.RX.CRIT}'
+          value: '-27'
+          description: 'ONT Rx power critical threshold, dBm. Flags the worst ~0.3% on the reference OLT.'
+        - macro: '{$GPON.ONT.RX.MAX}'
+          value: '-8'
+          description: 'ONT Rx power upper threshold, dBm - above this the receiver may saturate.'
+        - macro: '{$GPON.ONT.RX.MIN}'
+          value: '-25'
+          description: 'ONT Rx power (downstream) warning threshold, dBm. Measured on the reference OLT over 1582 active ONTs: median -21.1, 5th pct -23.9, 1st pct -25.4, worst -30.0. This default flags the worst ~1.5%.'
+        - macro: '{$GPON.ONT.TEMP.MAX}'
+          value: '75'
+          description: 'ONT optical module temperature threshold, °C.'
+        - macro: '{$GPON.PON.DESCR.MATCHES}'
+          value: ^GPON
+          description: 'ifDescr pattern that identifies PON ports for the per-port ONT counters.'
+        - macro: '{$GPON.PON.DROP}'
+          value: '10'
+          description: 'How many ONTs may disappear from one PON port between two checks before it is treated as a fibre/splitter fault rather than individual subscribers.'
+        - macro: '{$GPON.RX.ASYM.MIN}'
+          value: '5'
+          description: 'Minimum ONT Rx - OLT Rx asymmetry, in dB, required before a low ONT Rx power raises an alarm. A link that is weak in BOTH directions by the same amount is simply a long/heavily-split path; a link that is weak only downstream points at a real fault. Measured on this OLT the asymmetry is 5.55 dB median (min 0.06, max 12.62), so this gate keeps the genuinely lopsided links only.'
+        - macro: '{$GPON.RX.DROP}'
+          value: '4'
+          description: 'How far the Rx power may fall below its own 7-day baseline before alerting, dB. This is the threshold that actually finds new faults: it is independent of the absolute level, so it works equally well for an ONT sitting at -18 and one sitting at -29 dBm.'
+        - macro: '{$IF.BCAST.WARN}'
+          value: '5000'
+          description: 'Inbound broadcast rate that is treated as a broadcast storm, pps.'
+        - macro: '{$IF.DESCR.MATCHES}'
+          value: '.*'
+          description: 'Interfaces whose ifDescr matches this regexp are discovered. Set it to e.g. "^GPON" to monitor PON ports only, or "^(XE|GE)" for uplinks only.'
+        - macro: '{$IF.DESCR.NOT_MATCHES}'
+          value: CHANGE_IF_NEEDED
+          description: 'Interfaces whose ifDescr matches this regexp are NOT discovered.'
+        - macro: '{$IF.ERRORS.WARN}'
+          value: '2'
+          description: 'Interface error rate trigger threshold, pps.'
+        - macro: '{$IF.HIGHSPEED.NOT_MATCHES}'
+          value: ^0$
+          description: 'Interfaces whose ifHighSpeed matches this regexp are NOT discovered. The default drops interfaces that report no nominal speed - bridges, loopback and channel groups on this platform. Set it to CHANGE_IF_NEEDED to keep them.'
+        - macro: '{$IF.UTIL.MAX}'
+          value: '90'
+          description: 'Interface utilization trigger threshold, %.'
+        - macro: '{$MEMORY.UTIL.MAX}'
+          value: '90'
+          description: 'Memory utilization trigger threshold, %.'
+        - macro: '{$SNMP.TIMEOUT}'
+          value: 5m
+          description: 'No-data period used by SNMP availability triggers.'
+      dashboards:
+        - uuid: 05816016dff9410d95dd1f13581cba90
+          name: default
+          pages:
+            - name: 'Network traffic'
+              display_period: '3600'
+              widgets:
+                - type: graph
+                  name: 'ONT-y łacznie'
+                  width: '24'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'DASAN GPON OLT SLE by SNMP'
+                        name: ONTs
+                    - type: STRING
+                      name: reference
+                      value: XSUEB
+                - type: svggraph
+                  name: 'Aktywne ONT-y na port PON'
+                  'y': '5'
+                  width: '36'
+                  height: '6'
+                  fields:
+                    - type: INTEGER
+                      name: ds.0.color_palette
+                      value: '0'
+                    - type: INTEGER
+                      name: ds.0.fill
+                      value: '0'
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'PON *: Active ONTs'
+                    - type: INTEGER
+                      name: ds.0.missingdatafunc
+                      value: '1'
+                    - type: INTEGER
+                      name: ds.0.width
+                      value: '2'
+                    - type: STRING
+                      name: lefty_min
+                      value: '0'
+                    - type: INTEGER
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
+                      value: '1'
+                    - type: STRING
+                      name: reference
+                      value: PONAA
+                    - type: INTEGER
+                      name: righty
+                      value: '0'
+                    - type: INTEGER
+                      name: severities.0
+                      value: '4'
+                    - type: INTEGER
+                      name: show_problems
+                      value: '1'
+                    - type: INTEGER
+                      name: simple_triggers
+                      value: '1'
+                - type: graphprototype
+                  name: 'Ruch na porcie'
+                  'y': '11'
+                  width: '72'
+                  height: '24'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '3'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'DASAN GPON OLT SLE by SNMP'
+                        name: 'Interface {#IFDESCR}({#IFALIAS}): Network traffic'
+                    - type: STRING
+                      name: reference
+                      value: YNGUU
+                    - type: INTEGER
+                      name: rows
+                      value: '8'
+                - type: graph
+                  name: CPU
+                  x: '24'
+                  width: '24'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'DASAN GPON OLT SLE by SNMP'
+                        name: CPU
+                    - type: STRING
+                      name: reference
+                      value: CPUAA
+                - type: graph
+                  name: Pamieć
+                  x: '48'
+                  width: '24'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'DASAN GPON OLT SLE by SNMP'
+                        name: Memory
+                    - type: STRING
+                      name: reference
+                      value: MEMAA
+      valuemaps:
+        - uuid: 15da882052ba483eb287f079472d7187
+          name: 'GPON ONT deactivation reason'
+          mappings:
+            - value: '1'
+              newvalue: none
+            - value: '2'
+              newvalue: 'dying gasp (DGI)'
+            - value: '3'
+              newvalue: 'loss of signal (LOSI)'
+            - value: '4'
+              newvalue: 'loss of frame (LOFI)'
+            - value: '5'
+              newvalue: 'signal fail (SFI)'
+            - value: '6'
+              newvalue: 'signal degrade (SUFI)'
+            - value: '7'
+              newvalue: 'loss of acknowledge (LOAI)'
+            - value: '8'
+              newvalue: 'loss of PLOAM (LOAMI)'
+            - value: '9'
+              newvalue: 'loss of key sync (LOKI)'
+            - value: '10'
+              newvalue: 'admin: reset'
+            - value: '11'
+              newvalue: 'admin: active change'
+            - value: '12'
+              newvalue: 'admin: OLT configuration'
+            - value: '13'
+              newvalue: 'admin: slot restart'
+            - value: '14'
+              newvalue: 'admin: slot remove'
+            - value: '15'
+              newvalue: 'admin: rogue ONU candidate'
+            - value: '16'
+              newvalue: 'admin: rogue ONU'
+            - value: '17'
+              newvalue: 'admin: rogue ONU self-detect block'
+            - value: '18'
+              newvalue: 'admin: optic Tx off'
+            - value: '19'
+              newvalue: 'admin: deactivate'
+            - value: '20'
+              newvalue: 'admin: OLT deactivate'
+            - value: '21'
+              newvalue: 'admin: OMCC down'
+            - value: '22'
+              newvalue: 'admin: set redundancy'
+            - value: '23'
+              newvalue: 'admin: remove ONU'
+            - value: '24'
+              newvalue: 'admin: service mode'
+            - value: '25'
+              newvalue: 'admin: manual power off'
+            - value: '100'
+              newvalue: 'loss of signal (LOS)'
+            - value: '101'
+              newvalue: ranging
+            - value: '102'
+              newvalue: 'password authentication'
+            - value: '103'
+              newvalue: 'password inconsistency'
+            - value: '104'
+              newvalue: 'password mismatch'
+            - value: '105'
+              newvalue: 'password timeout'
+            - value: '106'
+              newvalue: 'password ONU alarm'
+            - value: '107'
+              newvalue: 'password disable event'
+            - value: '255'
+              newvalue: unknown
+        - uuid: 05189943385c40be8bc565e3451af6c9
+          name: 'GPON ONT status'
+          mappings:
+            - value: '0'
+              newvalue: invalid
+            - value: '1'
+              newvalue: inactive
+            - value: '2'
+              newvalue: active
+            - value: '3'
+              newvalue: running
+            - value: '4'
+              newvalue: activePending
+            - value: '5'
+              newvalue: deactivePending
+            - value: '6'
+              newvalue: disablePending
+            - value: '7'
+              newvalue: disable
+            - value: '255'
+              newvalue: unknown
+        - uuid: b8e1916bf02344809f51ad3eddb0e3b8
+          name: 'IF-MIB::ifAdminStatus'
+          mappings:
+            - value: '1'
+              newvalue: up
+            - value: '2'
+              newvalue: down
+            - value: '3'
+              newvalue: testing
+        - uuid: 03ea499968be4db38935c816de552d44
+          name: 'IF-MIB::ifOperStatus'
+          mappings:
+            - value: '1'
+              newvalue: up
+            - value: '2'
+              newvalue: down
+            - value: '3'
+              newvalue: testing
+            - value: '4'
+              newvalue: unknown
+            - value: '5'
+              newvalue: dormant
+            - value: '6'
+              newvalue: notPresent
+            - value: '7'
+              newvalue: lowerLayerDown
+        - uuid: fe815358b1324f6abadb1c3e54596eb7
+          name: zabbix.host.available
+          mappings:
+            - value: '0'
+              newvalue: 'not available'
+            - value: '1'
+              newvalue: available
+            - value: '2'
+              newvalue: unknown
+  triggers:
+    - uuid: 63dcbd7cbb99486c829a0b7bda4af83c
+      expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.active,#2)-last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.active))>={$GPON.ONT.MASS.DROP} and last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total)=last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total,#2)'
+      name: 'GPON: Mass ONT outage - {$GPON.ONT.MASS.DROP}+ active ONTs went down'
+      event_name: 'GPON: {$GPON.ONT.MASS.DROP}+ ONTs dropped out of service between two checks'
+      priority: DISASTER
+      description: |
+        Fires on the transition, so close it once the outage is handled.
+        
+        Guarded on gpon.ont.count.total being unchanged: a truncated SNMP walk lowers the active count as well, and that must not raise a disaster.
+      manual_close: 'YES'
+      tags:
+        - tag: component
+          value: gpon
+        - tag: scope
+          value: availability
+    - uuid: af5df841dfa04db8a463af7952870c0b
+      expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.active)/last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total)*100<{$GPON.ONT.ACTIVE.MIN}'
+      name: 'GPON: Share of active ONTs dropped'
+      event_name: 'GPON: fewer than {$GPON.ONT.ACTIVE.MIN}% of provisioned ONTs are active'
+      priority: HIGH
+      description: 'A sudden drop of the active share usually means a PON port, a feeder fibre or a whole splitter went down rather than a single subscriber.'
+      dependencies:
+        - name: 'GPON: Mass ONT outage - {$GPON.ONT.MASS.DROP}+ active ONTs went down'
+          expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.active,#2)-last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.active))>={$GPON.ONT.MASS.DROP} and last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total)=last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total,#2)'
+      tags:
+        - tag: scope
+          value: availability
+  graphs:
+    - uuid: bcd474cb1283480ba63c035162ee9d66
+      name: CPU
+      yaxismax: '0'
+      graph_items:
+        - color: FF0000
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: system.cpu.load5s
+    - uuid: 28d81ee88ae449e8b28dad360d076a64
+      name: Memory
+      yaxismax: '0'
+      graph_items:
+        - color: 0080FF
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: vm.memory.total
+        - sortorder: '1'
+          drawtype: FILLED_REGION
+          color: 00FF00
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: vm.memory.used
+        - sortorder: '2'
+          color: FF0000
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: vm.memory.util
+    - uuid: 52fba9cdac6f4c97b55e49fd2adc1e6c
+      name: ONTs
+      yaxismax: '0'
+      graph_items:
+        - drawtype: DASHED_LINE
+          color: 0080FF
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: gpon.ont.count.total
+        - sortorder: '1'
+          color: 00FF00
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: gpon.ont.count.active
+        - sortorder: '2'
+          color: FF0000
+          calc_fnc: ALL
+          item:
+            host: 'DASAN GPON OLT SLE by SNMP'
+            key: gpon.ont.count.inactive

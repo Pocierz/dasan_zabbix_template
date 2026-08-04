@@ -1,0 +1,11 @@
+# Surowy snmpwalk z produkcyjnego OLT-a (57 MB).
+# Zawiera dane wrazliwe: opisy 1767 abonentow (nazwy ulic i numery budynkow),
+# adresy MAC ONT-ow, numery seryjne i wewnetrzna adresacje IP.
+# Sluzyl do zdekodowania OID-ow i nie trafia do repozytorium.
+snmpwalk_dasan
+snmpwalk_*
+
+# Robocze
+*.tmp
+*.bak
+*~
