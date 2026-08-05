@@ -688,7 +688,7 @@ zabbix_export:
                   expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.ont.downcount[{#SNMPINDEX}])-min(/DASAN GPON OLT SLE by SNMP/gpon.ont.downcount[{#SNMPINDEX}],1h))>{$GPON.ONT.FLAP.COUNT}'
                   name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is flapping'
                   event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: more than {$GPON.ONT.FLAP.COUNT} link drops in the last hour'
-                  priority: AVERAGE
+                  priority: INFO
                   manual_close: 'YES'
                   tags:
                     - tag: scope
@@ -743,7 +743,7 @@ zabbix_export:
                 - uuid: 02419525e1584d69a576642c078aaca7
                   expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.fec.uncorrected[{#SNMPINDEX}],30m)>0'
                   name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: FEC uncorrectable codewords are increasing'
-                  priority: AVERAGE
+                  priority: INFO
                   description: 'Sustained uncorrectable FEC errors mean real data loss on the PON link for this ONT.'
                   manual_close: 'YES'
                   tags:
@@ -833,7 +833,7 @@ zabbix_export:
                 - uuid: 1ad0e4a1b1314b7795b88bec5794a49b
                   expression: 'last(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}])<>2 and count(/DASAN GPON OLT SLE by SNMP/gpon.ont.status[{#SNMPINDEX}],{$GPON.ONT.DOWN.LOOKBACK},"eq","2")>0'
                   name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT is not active'
-                  priority: WARNING
+                  priority: INFO
                   description: |
                     sleGponOnuStatus left active(2). Check the "Deactivation reason" item to tell a customer power cut (dying gasp) from a fibre fault (LOS).
                     
@@ -1003,7 +1003,7 @@ zabbix_export:
               recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>({$GPON.ONT.RX.CRIT}+1)'
               name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is critically low'
               event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is below {$GPON.ONT.RX.CRIT} dBm'
-              priority: AVERAGE
+              priority: INFO
               description: |
                 Downstream power measured by the ONT itself.
                 
@@ -1023,7 +1023,7 @@ zabbix_export:
               recovery_expression: 'min(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)>({$GPON.ONT.RX.MIN}+1) or (avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)-avg(/DASAN GPON OLT SLE by SNMP/gpon.ont.oltrxpower[{#SNMPINDEX}],30m))<={$GPON.RX.ASYM.MIN}'
               name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is low'
               event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is below {$GPON.ONT.RX.MIN} dBm'
-              priority: WARNING
+              priority: INFO
               description: |
                 Downstream power measured by the ONT itself.
                 
@@ -1044,7 +1044,7 @@ zabbix_export:
               recovery_expression: 'max(/DASAN GPON OLT SLE by SNMP/gpon.ont.rxpower[{#SNMPINDEX}],30m)<({$GPON.ONT.RX.MAX}-1)'
               name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is too high'
               event_name: 'ONT {#PONPORT}:{#ONTID} [{#ONTDESC}]: ONT Rx power is above {$GPON.ONT.RX.MAX} dBm'
-              priority: WARNING
+              priority: INFO
               description: |
                 The ONT may sit too close to the OLT or an attenuator is missing - the receiver can saturate.
                 
@@ -1757,8 +1757,8 @@ zabbix_export:
           value: '75'
           description: 'ONT optical module temperature threshold, °C.'
         - macro: '{$GPON.PON.DESCR.MATCHES}'
-          value: ^GPON
-          description: 'ifDescr pattern that identifies PON ports for the per-port ONT counters.'
+          value: GPON
+          description: 'Regexp identifying PON ports by ifDescr, for the per-port ONT counters. Deliberately NOT anchored: port naming differs between models - "GPON2/3" on a V8102 but "Port10-GPON" on other chassis. An anchored "^GPON" silently discovers nothing on the latter.'
         - macro: '{$GPON.PON.DROP}'
           value: '10'
           description: 'How many ONTs may disappear from one PON port between two checks before it is treated as a fibre/splitter fault rather than individual subscribers.'

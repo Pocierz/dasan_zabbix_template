@@ -184,14 +184,21 @@ dobrze przy −18 jak przy −29 dBm. Wymagają ok. tygodnia historii.
 ## Aktywne ONT-y na port PON
 
 Agregat `GPON: ONTs active` nie pokazuje, **który** port traci ONT-y. Dlatego
-osobna reguła LLD `gpon.pon.discovery` (filtr `{$GPON.PON.DESCR.MATCHES}` = `^GPON`)
+osobna reguła LLD `gpon.pon.discovery` (filtr `{$GPON.PON.DESCR.MATCHES}` = `GPON`)
 wykrywa same porty PON i tworzy po jednym itemie na port:
 
 * `gpon.pon.ont.active[{#SNMPINDEX}]`, nazwa `PON {#IFDESCR}: Active ONTs`
 * zależny od tego samego mastera `gpon.ont.walk.status` — **zero dodatkowego SNMP**
 * JavaScript liczy linie `...3.1.1.2.<ifIndex>.<ontId> = INTEGER: 2`
 
-Zweryfikowane: 32 itemy, suma = 1582, czyli co do jednego tyle, ile agregat.
+Zweryfikowane na dwóch różnych OLT-ach: 32 porty / suma 1579 oraz 16 portów /
+suma 386 — w obu przypadkach co do jednego tyle, ile agregat.
+
+**Filtr jest celowo bez kotwicy `^`.** Nazewnictwo portów różni się między
+modelami: `GPON2/3` na V8102 (Gdańska), ale `Port10-GPON` na innym chassis
+(Kosynierów). Wzorzec `^GPON` na tym drugim **nie zgłasza błędu — po prostu nie
+wykrywa niczego**, więc wykres per port zostaje pusty przy zdrowych regułach LLD.
+Różni się też numeracja ifIndex: 1000001–2000016 kontra 1–16.
 
 Wykres to widget **`svggraph` ze wzorcem nazwy** `PON *: Active ONTs`, a nie
 zwykły wykres. Ma to znaczenie: prototyp wykresu dałby jeden wykres *na port*,
@@ -265,7 +272,7 @@ pokazują zera:
 
 | Co | Gdzie | Wartość |
 |---|---|---|
-| `max_repetitions` | interfejs SNMP hosta | **50** (domyślne 10 = 5× więcej zapytań GETBULK) |
+| `max_repetitions` | interfejs SNMP hosta | **50** (domyślne 10 = 5× więcej zapytań GETBULK) — ustawienie **hosta**, nie schodzi z szablonu, trzeba powtórzyć przy każdym nowym OLT |
 | `timeout` | itemy `gpon.ont.walk.*` | **30 s** (globalne 3 s nie wystarcza) |
 
 Zmierzone na tym OLT przy max-rep 50: jedna kolumna 1767 wierszy ~0.75 s,
