@@ -1197,6 +1197,43 @@ zabbix_export:
                   value: gpon
                 - tag: pon-port
                   value: '{#IFDESCR}'
+            - uuid: 68582a64c0304b858cb3542ab36ec603
+              name: 'PON {#IFDESCR}: Average ONT Rx power'
+              type: DEPENDENT
+              key: 'gpon.pon.rxpower.avg[{#SNMPINDEX}]'
+              history: 90d
+              value_type: FLOAT
+              units: dBm
+              description: |
+                Mean downstream optical power across the ONTs on this PON port, from sleGponOnuAniOpticModuleRxPower.
+                
+                Offline ONTs carry no DDM row at all, so they drop out of the average on their own instead of dragging it down. A port with no active ONTs yields no value rather than an error.
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var re = /^\.?1\.3\.6\.1\.4\.1\.6296\.101\.23\.6\.6\.1\.1\.20\.{#SNMPINDEX}\.[0-9]+\.[0-9]+\s*=\s*(?:[A-Za-z0-9-]+:\s*)?"?(-?[0-9]+(?:\.[0-9]+)?)"?\s*$/;
+                      var sum = 0, n = 0;
+                      value.split('\n').forEach(function (line) {
+                          var m = re.exec(line.trim());
+                          if (m) { sum += parseFloat(m[1]); n++; }
+                      });
+                      // Port bez ani jednego aktywnego ONT-a nie ma sredniej. Zwracamy pusty
+                      // lancuch, ktory nastepny krok odrzuca - inaczej item wpadlby w NOT SUPPORTED.
+                      if (n === 0) { return ''; }
+                      return String(sum / n);
+                      
+                - type: MATCHES_REGEX
+                  parameters:
+                    - '^-?[0-9]+(\.[0-9]+)?$'
+                  error_handler: DISCARD_VALUE
+              master_item:
+                key: gpon.ont.walk.optic
+              tags:
+                - tag: component
+                  value: gpon
+                - tag: pon-port
+                  value: '{#IFDESCR}'
           trigger_prototypes:
             - uuid: 3262887f03174e3cafb6a81238c06b54
               expression: '(last(/DASAN GPON OLT SLE by SNMP/gpon.pon.ont.active[{#SNMPINDEX}],#2)-last(/DASAN GPON OLT SLE by SNMP/gpon.pon.ont.active[{#SNMPINDEX}]))>={$GPON.PON.DROP} and last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total)=last(/DASAN GPON OLT SLE by SNMP/gpon.ont.count.total,#2)'
@@ -1796,11 +1833,9 @@ zabbix_export:
         - uuid: 05816016dff9410d95dd1f13581cba90
           name: default
           pages:
-            - name: 'Network traffic'
-              display_period: '3600'
-              widgets:
+            - widgets:
                 - type: graph
-                  name: 'ONT-y łacznie'
+                  name: 'ONT-y lacznie'
                   width: '24'
                   height: '5'
                   fields:
@@ -1816,14 +1851,11 @@ zabbix_export:
                   name: 'Aktywne ONT-y na port PON'
                   'y': '5'
                   width: '36'
-                  height: '6'
+                  height: '12'
                   fields:
-                    - type: INTEGER
-                      name: ds.0.color_palette
-                      value: '0'
-                    - type: INTEGER
-                      name: ds.0.fill
-                      value: '0'
+                    - type: STRING
+                      name: ds.0.color
+                      value: 1976D2
                     - type: STRING
                       name: ds.0.items.0
                       value: 'PON *: Active ONTs'
@@ -1845,23 +1877,11 @@ zabbix_export:
                     - type: STRING
                       name: reference
                       value: PONAA
-                    - type: INTEGER
-                      name: righty
-                      value: '0'
-                    - type: INTEGER
-                      name: severities.0
-                      value: '4'
-                    - type: INTEGER
-                      name: show_problems
-                      value: '1'
-                    - type: INTEGER
-                      name: simple_triggers
-                      value: '1'
                 - type: graphprototype
                   name: 'Ruch na porcie'
-                  'y': '11'
+                  'y': '17'
                   width: '72'
-                  height: '24'
+                  height: '42'
                   fields:
                     - type: INTEGER
                       name: columns
@@ -1876,7 +1896,7 @@ zabbix_export:
                       value: YNGUU
                     - type: INTEGER
                       name: rows
-                      value: '8'
+                      value: '4'
                 - type: graph
                   name: CPU
                   x: '24'
@@ -1891,8 +1911,36 @@ zabbix_export:
                     - type: STRING
                       name: reference
                       value: CPUAA
+                - type: svggraph
+                  name: 'Srednia sygnalu na port PON'
+                  x: '36'
+                  'y': '5'
+                  width: '36'
+                  height: '12'
+                  fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: E65100
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'PON *: Average ONT Rx power'
+                    - type: INTEGER
+                      name: ds.0.missingdatafunc
+                      value: '1'
+                    - type: INTEGER
+                      name: ds.0.width
+                      value: '2'
+                    - type: INTEGER
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
+                      value: '1'
+                    - type: STRING
+                      name: reference
+                      value: PONRX
                 - type: graph
-                  name: Pamieć
+                  name: Pamiec
                   x: '48'
                   width: '24'
                   height: '5'
